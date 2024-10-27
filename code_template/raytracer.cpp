@@ -34,12 +34,32 @@ int main(int argc, char* argv[])
         {   0,   0, 255 },  // Blue
         {   0,   0,   0 },  // Black
     };
+    //each camera has its own image plane
+    
+    //int columnWidth = width / 8;
 
-    int width = 640, height = 480;
-    int columnWidth = width / 8;
+    
+    
 
-    unsigned char* image = new unsigned char [width * height * 3];
+    int columns, rows;
+    for (Camera cam : scene.cameras) { //for each camera in the scene, we will generate another output file
+        int width = scene.cameras[0].image_width, height = scene.cameras[0].image_height;
+        unsigned char* image = new unsigned char [width * height * 3]; //that will bring huge memory overhead
+        //since it will be generated for each camera
+        //cannot give variable-size length to c-array since size should be known at compile time
+        columns = cam.image_width;
+        rows = cam.image_height;
+        normalize(cam.gaze);
+        cam.u = cross(cam.up, negate(cam.gaze)); // u = v x w
+        for(int i = 0; i < rows; i++){
+            for(int j = 0; j < columns; j++){
+                Ray r = calculateRay(cam, i, j);
 
+            }
+        }
+        write_ppm(cam.image_name.c_str(), image, cam.image_width, cam.image_height);
+    }
+    /*
     int i = 0;
     for (int y = 0; y < height; ++y)
     {
@@ -51,16 +71,11 @@ int main(int argc, char* argv[])
             image[i++] = BAR_COLOR[colIdx][2];
         }
     }
+    */
 
-    write_ppm("test.ppm", image, width, height);
 
 
-    for (Camera cam : scene.cameras) {
-        normalize(cam.gaze);
-        cam.u = cross(cam.up, negate(cam.gaze)); // u = v x w
-    }
-
-    calculateRay(scene.cameras[0], 10, 20);
+    
 }
 
 Ray calculateRay(Camera cam, int i, int j) {
