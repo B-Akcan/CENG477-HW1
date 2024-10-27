@@ -87,9 +87,9 @@ namespace parser
         Vec3f ambient_light;
         std::vector<PointLight> point_lights;
         std::vector<Material> materials;
-        std::vector<Vec3f> vertex_data;
+        std::vector<Vec3f> vertex_data; //coordinate points of the objects(center for sphere, 3 corners for triangle)
         std::vector<Mesh> meshes;
-        std::vector<Triangle> triangles;
+        std::vector<Triangle> triangles; 
         std::vector<Sphere> spheres;
 
         //Functions

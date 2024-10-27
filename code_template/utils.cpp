@@ -27,7 +27,12 @@ Vec3f cross(Vec3f a, Vec3f b) {
     return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
 }
 
-Vec3f negate(Vec3f v) {
+Vec3f negateVector(Vec3f v) {
     return multiplyScalar(v, -1);
+}
+
+float dot(Vec3f a, Vec3f b) { //multiplying each component by other vector's each component
+    //the ones with same unit vectors make non-zero value
+    return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
