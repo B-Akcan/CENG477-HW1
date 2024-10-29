@@ -14,17 +14,8 @@ Vec3f computeColor(Ray r, vector<Sphere> & sphereVector, vector<Vec3f>& vertex_d
 
 int main(int argc, char* argv[])
 {
-    // Sample usage for reading an XML scene file
     parser::Scene scene;
-
     scene.loadFromXml(argv[1]);
-
-    // The code below creates a test pattern and writes
-    // it to a PPM file to demonstrate the usage of the
-    // ppm_write function.
-    //
-    // Normally, you would be running your ray tracing
-    // code here to produce the desired image.
 
     const RGB BAR_COLOR[8] =
     {
@@ -37,12 +28,6 @@ int main(int argc, char* argv[])
         {   0,   0, 255 },  // Blue
         {   0,   0,   0 },  // Black
     };
-    //each camera has its own image plane
-    
-    //int columnWidth = width / 8;
-
-    
-    
 
     int columns, rows;
     for (Camera cam : scene.cameras) { //for each camera in the scene, we will generate another output file
@@ -69,7 +54,9 @@ int main(int argc, char* argv[])
                 */
             }
         }
-        write_ppm(cam.image_name.c_str(), image, cam.image_width, cam.image_height);
+
+        std::string output_path = "../outputs_dev/" + cam.image_name;
+        write_ppm(output_path.c_str(), image, cam.image_width, cam.image_height);
     }
     /*
     int i = 0;
