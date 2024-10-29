@@ -1,6 +1,7 @@
 #include "parser.h"
 #include <cmath>
 #include "utils.h"
+#include <iostream>
 using namespace parser;
 
 Vec3f multiplyScalar(Vec3f v, float s) {
@@ -34,5 +35,9 @@ Vec3f negateVector(Vec3f v) {
 float dot(Vec3f a, Vec3f b) { //multiplying each component by other vector's each component
     //the ones with same unit vectors make non-zero value
     return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+void printVec3f(Vec3f vec) {
+    std::cout << "x: " << vec.x << " y: " << vec.y << " z: " << vec.z << std::endl;
 }
 

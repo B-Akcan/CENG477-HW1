@@ -1,80 +1,31 @@
-#include <iostream>
-#include "parser.h"
-#include "ppm.h"
-#include "utils.h"
-#include <cmath>
-
-using namespace parser;
-using namespace std;
-
-typedef unsigned char RGB[3];
-Ray calculateRay(Camera cam, int i, int j);
-float intersectSphere(Ray r, Sphere s, vector<Vec3f>& vertex_data);
-Vec3f computeColor(Ray r, vector<Sphere> & sphereVector, vector<Vec3f>& vertex_data, vector<PointLight>& pointVector);
+#include "raytracer.h"
 
 int main(int argc, char* argv[])
 {
     parser::Scene scene;
+
     scene.loadFromXml(argv[1]);
 
-    const RGB BAR_COLOR[8] =
-    {
-        { 255, 255, 255 },  // 100% White
-        { 255, 255,   0 },  // Yellow
-        {   0, 255, 255 },  // Cyan
-        {   0, 255,   0 },  // Green
-        { 255,   0, 255 },  // Magenta
-        { 255,   0,   0 },  // Red
-        {   0,   0, 255 },  // Blue
-        {   0,   0,   0 },  // Black
-    };
+    for (Camera cam : scene.cameras) {
+        int width = cam.image_width;
+        int height = cam.image_height;
+        unsigned char* image = new unsigned char [width * height * 3];
 
-    int columns, rows;
-    for (Camera cam : scene.cameras) { //for each camera in the scene, we will generate another output file
-        int width = cam.image_width, height = cam.image_height;
-        unsigned char* image = new unsigned char [width * height * 3]; //that will bring huge memory overhead
-        //since it will be generated for each camera
-        //cannot give variable-size length to c-array since size should be known at compile time
-        columns = cam.image_width;
-        rows = cam.image_height;
         normalize(cam.gaze);
-        cam.u = cross(cam.up, negateVector(cam.gaze)); // u = v x w
-        for(int i = 0; i < rows; i++){
-            for(int j = 0; j < columns; j++){
+        calculateCameraUVector(cam);
+
+        for (int i = 0; i < height; i++) {
+            for (int j = 0; j < width; j++) {
                 Ray r = calculateRay(cam, i, j);
-                Vec3f color = computeColor(r, scene.spheres, scene.vertex_data, scene.point_lights); //will return which object is intersected (closest one) 
-                //cout << "Color: " << color.x << " " << color.y << " " << color.z << endl;
-                image[ (j*height  + i)*3] = color.x * 255;
-                image[ (j*height  + i)*3 + 1] = color.y * 255;
-                image[ (j*height  + i)*3 + 2] = color.z * 255;
-                /*
-                image[i*width*3+j].x = color.x * 255;
-                image[i][j].y = color.y * 255;
-                image[i][j].z = color.z * 255;
-                */
+                Vec3f color = computeColor(r, scene.spheres, scene.vertex_data, scene.point_lights);
+                int pixelPosition = (i * height + j) * 3;
+                colorPixel(image, pixelPosition, color);
             }
         }
 
         std::string output_path = "../outputs_dev/" + cam.image_name;
         write_ppm(output_path.c_str(), image, cam.image_width, cam.image_height);
     }
-    /*
-    int i = 0;
-    for (int y = 0; y < height; ++y)
-    {
-        for (int x = 0; x < width; ++x)
-        {
-            int colIdx = x / columnWidth;
-            image[i++] = BAR_COLOR[colIdx][0];
-            image[i++] = BAR_COLOR[colIdx][1];
-            image[i++] = BAR_COLOR[colIdx][2];
-        }
-    }
-    */
-
-
-
-    
 }
 
 Ray calculateRay(Camera cam, int i, int j) {
@@ -151,4 +102,14 @@ Vec3f computeColor(Ray r, vector<Sphere> & sphereVector, vector<Vec3f>& vertex_d
 
     //normally, if dot product is greater than 0 ,we should return the color
     return c;
+}
+
+void colorPixel(unsigned char* &image, int pixelPosition, Vec3f color) {
+    image[ pixelPosition] = color.x * 255; // R
+    image[ pixelPosition + 1] = color.y * 255; // G
+    image[ pixelPosition + 2] = color.z * 255; // B
+}
+
+void calculateCameraUVector (Camera &cam) {
+    cam.u = cross(cam.up, negateVector(cam.gaze));
 }
