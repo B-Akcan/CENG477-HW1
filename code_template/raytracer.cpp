@@ -14,12 +14,14 @@ int main(int argc, char* argv[])
         normalize(cam.gaze);
         calculateCameraUVector(cam);
 
+        int index = 0;
         for (int i = 0; i < height; i++) {
             for (int j = 0; j < width; j++) {
                 Ray r = calculateRay(cam, i, j);
                 Vec3f color = computeColor(r, scene.spheres, scene.vertex_data, scene.point_lights);
-                int pixelPosition = (i * height + j) * 3;
+                int pixelPosition = index * 3;
                 colorPixel(image, pixelPosition, color);
+                index++;
             }
         }
 
@@ -30,9 +32,9 @@ int main(int argc, char* argv[])
 
 Ray calculateRay(Camera cam, int i, int j) {
     Ray r;
-    Vec3f s; //pixel position at (i,j)
-    float su = (i+0.5) * (cam.near_plane.y - cam.near_plane.x) / cam.image_width;
-    float sv = (j+0.5) * (cam.near_plane.w - cam.near_plane.z) / cam.image_height;
+    Vec3f s; //pixel position at (i-th row, j-th column)
+    float su = (j+0.5) * (cam.near_plane.y - cam.near_plane.x) / cam.image_width; //su is horizontal distance
+    float sv = (i+0.5) * (cam.near_plane.w - cam.near_plane.z) / cam.image_height; //sv is vertical distance
 
     Vec3f m = add(cam.position, multiplyScalar(cam.gaze, cam.near_distance));
     Vec3f q = add(m, add(multiplyScalar(cam.u, cam.near_plane.x), multiplyScalar(cam.up, cam.near_plane.w)));
