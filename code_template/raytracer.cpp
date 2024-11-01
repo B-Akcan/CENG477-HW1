@@ -18,7 +18,7 @@ int main(int argc, char* argv[])
         for (int i = 0; i < height; i++) {
             for (int j = 0; j < width; j++) {
                 Ray r = calculateRay(cam, i, j);
-                Vec3f color = computeColor(r, scene.spheres, scene.vertex_data, scene.point_lights);
+                Vec3f color = computeColor(r, scene);
                 int pixelPosition = index * 3;
                 colorPixel(image, pixelPosition, color);
                 index++;
@@ -44,74 +44,136 @@ Ray calculateRay(Camera cam, int i, int j) {
     return r;
 }
 
-float intersectSphere(Ray r, Sphere s, vector<Vec3f>& vertex_data){
+Vec3f computeColor(Ray ray, Scene scene) { //we find closest intersecting object and return its color
+    Vec3f color = { scene.background_color.x / 255., scene.background_color.y / 255., scene.background_color.z / 255. };
+    Intersection intersection;
+    int min_i = -1; //min_i -> id of the closest object
+    float min_t = __FLT_MAX__;
+    
+    for(int i = 0; i < scene.spheres.size(); i++){
+        intersection = intersectSphere(ray, scene.spheres[i], scene.vertex_data); //get intersection point with that spesific sphere
+        if(intersection.t < min_t && intersection.t >= 1) { //closer and in front of the image window
+            min_t = intersection.t; 
+            min_i = i;
+            color = {1.0, 0.0, 0.0}; //TODO: red color for trial
+        }
+    }
+    for (int i = 0; i < scene.triangles.size(); i++) {
+        intersection = intersectTriangle(ray, scene.triangles[i], scene.vertex_data);
+        if (intersection.t < min_t && intersection.t >= 1) {
+            min_t = intersection.t; 
+            min_i = i;
+            color = {0.0, 1.0, 0.0}; //TODO: red color for trial
+        }
+    }
+    for (int i = 0; i < scene.meshes.size(); i++) {
+        for (int j = 0; j < scene.meshes[i].faces.size(); j++) {
+            Triangle triangle = { scene.meshes[i].material_id, scene.meshes[i].faces[j] };
+            intersection = intersectTriangle(ray, triangle, scene.vertex_data);
+            if (intersection.t < min_t && intersection.t >= 1) {
+                min_t = intersection.t; 
+                min_i = i;
+                color = {1.0, 1.0, 1.0}; //TODO: red color for trial
+            }
+        }
+    }
+
+    if (min_i == -1)
+        return color; //no intersection, returning background color
+
+    color = diffuseShading(color, scene, intersection);
+
+    return color;
+}
+
+Intersection intersectSphere(Ray r, Sphere s, vector<Vec3f> vertex_data){
+    Intersection intersection;
     float A,B,C; //coefficients of the quadratic equation
     float delta;
-    Vec3f c;
-    c = vertex_data[s.center_vertex_id];
+    Vec3f center;
+    center = vertex_data[s.center_vertex_id - 1];
  
     //all scalars there
     //A -> d.d  t^2
     //B -> 2d(e-c) . t (o or e , same thing)
     //C -> (e-c)^2 - r^2
-    C = (r.e.x - c.x) * (r.e.x - c.x) + (r.e.y - c.y) * (r.e.y - c.y) + (r.e.z - c.z) * (r.e.z - c.z) - s.radius * s.radius;
-    B = 2 * (r.e.x - c.x) * r.d.x + 2 * (r.e.y - c.y) * r.d.y + 2 * (r.e.z - c.z) * r.d.z;
+    C = (r.e.x - center.x) * (r.e.x - center.x) + (r.e.y - center.y) * (r.e.y - center.y) + (r.e.z - center.z) * (r.e.z - center.z) - s.radius * s.radius;
+    B = 2 * (r.e.x - center.x) * r.d.x + 2 * (r.e.y - center.y) * r.d.y + 2 * (r.e.z - center.z) * r.d.z;
     A = r.d.x * r.d.x + r.d.y * r.d.y + r.d.z * r.d.z;
 
     delta = B*B - 4*A*C;
-    if(delta < 0) return -1; //no intersection
-    else if(delta == 0) return -B / (2*A); //one intersection point (tangent)
+    if (delta < 0)
+        intersection.t = -1; //no intersection
+    else if (delta == 0)
+        intersection.t = -B / (2*A); //one intersection point (tangent)
     else {
         delta = sqrt(delta);
         A = 2*A;
         float t1 = (-B - delta) / (A);
         float t2 = (-B + delta) / (A);
-        return (t1 < t2) ? t1 : t2; //return the closest intersection point
+        intersection.t = (t1 < t2) ? t1 : t2; //return the closest intersection point
     }
 
+    intersection.point = add(r.e, multiplyScalar(r.d, intersection.t));
+    intersection.normal = subtract(intersection.point, center);
+    normalize(intersection.normal);
+    intersection.mat_id = s.material_id;
+
+    return intersection;
 }
 
-Vec3f computeColor(Ray r, vector<Sphere> & sphereVector, vector<Vec3f>& vertex_data, vector<PointLight>& pointVector) { //we find closest intersecting object and return its color
-    int i, min_i = -1; //min_i -> id of the closest object
-    Vec3f c ={0,0,0}; //color
-    Vec3f L, N, P; //light vector and normal vector and intersection point
+Intersection intersectTriangle(Ray ray, Triangle triangle, vector<Vec3f> vertex_data) {
+    Intersection intersection;
+    float t, alpha, beta, gama, detA;
+    Vec3f v1 = vertex_data[triangle.indices.v0_id - 1];
+    Vec3f v2 = vertex_data[triangle.indices.v1_id - 1];
+    Vec3f v3 = vertex_data[triangle.indices.v2_id - 1];
     
-    float min_t = 1000000; //initially infinity
-    float t; //time of intersection
-    int size = sphereVector.size();
-    for(i = 0; i < size; i++){
-        t = intersectSphere(r, sphereVector[i], vertex_data); //get intersection point with that spesific sphere
-        if(t < min_t && t>= 1) { //closer and in front of the image window
-            min_t = t; 
-            min_i = i;
-            //c = sphereVector[i].color; //can also return the id of the object
-            c = {255,0,0}; //TODO: red color for trial
-        }
+    detA = determinant( v1.x-v2.x, v1.x-v3.x, ray.d.x,
+                        v1.y-v2.y, v1.y-v3.y, ray.d.y,
+                        v1.z-v2.z, v1.z-v3.z, ray.d.z );
+    beta = determinant( v1.x-ray.e.x, v1.x-v3.x, ray.d.x,
+                        v1.y-ray.e.y, v1.y-v3.y, ray.d.y,
+                        v1.z-ray.e.z, v1.z-v3.z, ray.d.z ) / detA;
+    gama = determinant( v1.x-v2.x, v1.x-ray.e.x, ray.d.x,
+                        v1.y-v2.y, v1.y-ray.e.y, ray.d.y,
+                        v1.z-v2.z, v1.z-ray.e.z, ray.d.z ) / detA;
+    t = determinant(v1.x-v2.x, v1.x-v3.x, v1.x-ray.e.x,
+                    v1.y-v2.y, v1.y-v3.y, v1.y-ray.e.y,
+                    v1.z-v2.z, v1.z-v3.z, v1.z-ray.e.z ) / detA;
+
+    if (beta + gama <= 1 && beta >= 0 && gama >= 0 && t > 0) {
+        intersection.t = t;
+        intersection.point = add(ray.e, multiplyScalar(ray.d, t));
+        intersection.normal = cross(subtract(v3, v2), subtract(v1, v2));
+        normalize(intersection.normal);
+        intersection.mat_id = triangle.material_id;
     }
-    if(min_i == -1) 
-        return c; //no intersection, returning background color
+    else {
+        intersection.t = -1;
+    }
 
-    P = add(r.e, multiplyScalar(r.d, min_t)); //intersection point
-    L = add(pointVector[0].position, multiplyScalar(P , -1));   //light point - intersection point
-    N = add(P, multiplyScalar(vertex_data[sphereVector[min_i].center_vertex_id], -1)); //normal vector (P - center of the sphere)
-    normalize(L);
-    normalize(N);
-    if(dot(N,L) < 0) //check whether light ray really sees the surface point
-        c.x = c.y = c.z = 0; //if the light is coming from the back side of the sphere, return the color
-    else
-        c = multiplyScalar(c, dot(N,L)); //diffuse component
-    //diffuse component -> (color) x (N . L) 
-
-    //normally, if dot product is greater than 0 ,we should return the color
-    return c;
+    return intersection;
 }
 
 void colorPixel(unsigned char* &image, int pixelPosition, Vec3f color) {
-    image[ pixelPosition] = color.x * 255; // R
+    image[ pixelPosition ] = color.x * 255; // R
     image[ pixelPosition + 1] = color.y * 255; // G
     image[ pixelPosition + 2] = color.z * 255; // B
 }
 
 void calculateCameraUVector (Camera &cam) {
     cam.u = cross(cam.up, negateVector(cam.gaze));
+}
+
+Vec3f diffuseShading(Vec3f color, Scene scene, Intersection intersection) {
+    Vec3f L = add(scene.point_lights[0].position, multiplyScalar(intersection.point, -1));   //light point - intersection point
+    normalize(L);
+
+    if (dot(intersection.normal, L) < 0) //check whether light ray really sees the surface point
+        color = { 0, 0, 0 }; //if the light is coming from the back side of the sphere, return the color
+    else
+        color = multiplyScalar(color, dot(intersection.normal, L)); //diffuse component
+
+    return color;
 }

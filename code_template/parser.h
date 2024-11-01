@@ -86,7 +86,7 @@ namespace parser
         std::vector<Camera> cameras;
         Vec3f ambient_light;
         std::vector<PointLight> point_lights;
-        std::vector<Material> materials;
+        std::vector<Material> materials; // index of vertex_data and materials start from 1
         std::vector<Vec3f> vertex_data; //coordinate points of the objects(center for sphere, 3 corners for triangle)
         std::vector<Mesh> meshes;
         std::vector<Triangle> triangles; 
