@@ -11,7 +11,7 @@ int main(int argc, char* argv[])
         int height = cam.image_height;
         unsigned char* image = new unsigned char [width * height * 3];
 
-        normalize(cam.gaze);
+        cam.gaze = normalize(cam.gaze);
         calculateCameraUVector(cam);
 
         int index = 0;
@@ -44,46 +44,64 @@ Ray calculateRay(Camera cam, int i, int j) {
     return r;
 }
 
-Vec3f computeColor(Ray ray, Scene scene) { //we find closest intersecting object and return its color
-    Vec3f color = { scene.background_color.x / 255., scene.background_color.y / 255., scene.background_color.z / 255. };
-    Intersection intersection;
-    int min_i = -1; //min_i -> id of the closest object
+Vec3f computeColor(Ray ray, Scene scene) {
     float min_t = __FLT_MAX__;
-    
-    for(int i = 0; i < scene.spheres.size(); i++){
-        intersection = intersectSphere(ray, scene.spheres[i], scene.vertex_data); //get intersection point with that spesific sphere
-        if(intersection.t < min_t && intersection.t >= 1) { //closer and in front of the image window
-            min_t = intersection.t; 
-            min_i = i;
-            color = {1.0, 0.0, 0.0}; //TODO: red color for trial
+    Intersection intersection = findClosestIntersection(min_t, ray, scene);
+
+    if (min_t == __FLT_MAX__)
+        return { (float) scene.background_color.x, (float) scene.background_color.y, (float) scene.background_color.z }; //no intersection, returning background color
+
+    Vec3f color = { 0.0, 0.0, 0.0 };;
+    color = add(color, ambientShading(scene, intersection));
+
+    Vec3f pointPlusEpsilon = add(intersection.point, multiplyScalar(intersection.normal, scene.shadow_ray_epsilon));
+    for (PointLight pl : scene.point_lights) {
+        Vec3f lightDirection = subtract(pl.position, intersection.point);
+        Vec3f normalizedLightDirection = normalize(lightDirection);
+        Ray shadowRay = { pointPlusEpsilon, normalizedLightDirection };
+        float temp = __FLT_MAX__;
+        Intersection shadowIntersection = findClosestIntersection(temp, shadowRay, scene);
+
+        if (shadowIntersection.t >= norm(lightDirection) || shadowIntersection.t == -1) {
+            color = add(color, diffuseShading(scene, intersection, pl));
+            color = add(color, specularShading(scene, intersection, ray, pl));
+        }
+    }
+
+    return color;
+}
+
+Intersection findClosestIntersection(float &min_t, Ray ray, Scene scene) {
+    Intersection temp_intersection;
+    Intersection intersection;
+    intersection.t = -1;
+
+    for(int i = 0; i < scene.spheres.size(); i++) {
+        temp_intersection = intersectSphere(ray, scene.spheres[i], scene.vertex_data); //get intersection point with that spesific sphere
+        if (temp_intersection.t < min_t && temp_intersection.t >= 1) { //closer and in front of the image window
+            min_t = temp_intersection.t;
+            intersection = temp_intersection;
         }
     }
     for (int i = 0; i < scene.triangles.size(); i++) {
-        intersection = intersectTriangle(ray, scene.triangles[i], scene.vertex_data);
-        if (intersection.t < min_t && intersection.t >= 1) {
-            min_t = intersection.t; 
-            min_i = i;
-            color = {0.0, 1.0, 0.0}; //TODO: red color for trial
+        temp_intersection = intersectTriangle(ray, scene.triangles[i], scene.vertex_data);
+        if (temp_intersection.t < min_t && temp_intersection.t >= 1) {
+            min_t = temp_intersection.t;
+            intersection = temp_intersection;
         }
     }
     for (int i = 0; i < scene.meshes.size(); i++) {
         for (int j = 0; j < scene.meshes[i].faces.size(); j++) {
             Triangle triangle = { scene.meshes[i].material_id, scene.meshes[i].faces[j] };
-            intersection = intersectTriangle(ray, triangle, scene.vertex_data);
-            if (intersection.t < min_t && intersection.t >= 1) {
-                min_t = intersection.t; 
-                min_i = i;
-                color = {1.0, 1.0, 1.0}; //TODO: red color for trial
+            temp_intersection = intersectTriangle(ray, triangle, scene.vertex_data);
+            if (temp_intersection.t < min_t && temp_intersection.t >= 1) {
+                min_t = temp_intersection.t;
+                intersection = temp_intersection;
             }
         }
     }
 
-    if (min_i == -1)
-        return color; //no intersection, returning background color
-
-    color = diffuseShading(color, scene, intersection);
-
-    return color;
+    return intersection;
 }
 
 Intersection intersectSphere(Ray r, Sphere s, vector<Vec3f> vertex_data){
@@ -115,8 +133,7 @@ Intersection intersectSphere(Ray r, Sphere s, vector<Vec3f> vertex_data){
     }
 
     intersection.point = add(r.e, multiplyScalar(r.d, intersection.t));
-    intersection.normal = subtract(intersection.point, center);
-    normalize(intersection.normal);
+    intersection.normal = normalize(subtract(intersection.point, center));
     intersection.mat_id = s.material_id;
 
     return intersection;
@@ -145,8 +162,7 @@ Intersection intersectTriangle(Ray ray, Triangle triangle, vector<Vec3f> vertex_
     if (beta + gama <= 1 && beta >= 0 && gama >= 0 && t > 0) {
         intersection.t = t;
         intersection.point = add(ray.e, multiplyScalar(ray.d, t));
-        intersection.normal = cross(subtract(v3, v2), subtract(v1, v2));
-        normalize(intersection.normal);
+        intersection.normal = normalize(cross(subtract(v3, v2), subtract(v1, v2)));
         intersection.mat_id = triangle.material_id;
     }
     else {
@@ -157,23 +173,41 @@ Intersection intersectTriangle(Ray ray, Triangle triangle, vector<Vec3f> vertex_
 }
 
 void colorPixel(unsigned char* &image, int pixelPosition, Vec3f color) {
-    image[ pixelPosition ] = color.x * 255; // R
-    image[ pixelPosition + 1] = color.y * 255; // G
-    image[ pixelPosition + 2] = color.z * 255; // B
+    image[pixelPosition] = (int) round(min(max(0.f, color.x), 255.f));
+    image[pixelPosition + 1] = (int) round(min(max(0.f, color.y), 255.f));
+    image[pixelPosition + 2] =  (int) round(min(max(0.f, color.z), 255.f));
 }
 
 void calculateCameraUVector (Camera &cam) {
     cam.u = cross(cam.up, negateVector(cam.gaze));
 }
 
-Vec3f diffuseShading(Vec3f color, Scene scene, Intersection intersection) {
-    Vec3f L = add(scene.point_lights[0].position, multiplyScalar(intersection.point, -1));   //light point - intersection point
-    normalize(L);
+Vec3f ambientShading(Scene scene, Intersection intersection) {
+    return multiplyVector(scene.ambient_light, scene.materials[intersection.mat_id - 1].ambient);
+}
 
-    if (dot(intersection.normal, L) < 0) //check whether light ray really sees the surface point
-        color = { 0, 0, 0 }; //if the light is coming from the back side of the sphere, return the color
-    else
-        color = multiplyScalar(color, dot(intersection.normal, L)); //diffuse component
+Vec3f diffuseShading(Scene scene, Intersection intersection, PointLight pl) {
+    Vec3f L = subtract(pl.position, intersection.point); // light vector
+    float cos_theta = max(0.f, dot(normalize(L), intersection.normal));
+    float dist_squared = dot(L, L);
+    Vec3f colorForPl = multiplyVector(pl.intensity, multiplyScalar(scene.materials[intersection.mat_id - 1].diffuse, cos_theta/dist_squared));
 
-    return color;
+    return colorForPl;
+}
+
+Vec3f specularShading(Scene scene, Intersection intersection, Ray ray, PointLight pl) {
+    Vec3f L = subtract(pl.position, intersection.point); // light vector
+
+    float cos_theta = max(0.f, dot(normalize(L), intersection.normal));
+    float theta = acos(cos_theta);
+    if (theta >= 90)
+        return { 0.f, 0.f, 0.f };
+
+    Vec3f halfVector = multiplyScalar(add(normalize(L), normalize(subtract(ray.e, intersection.point))), 0.5);
+    float cos_alpha_with_phong = pow(max(0.f, dot(normalize(halfVector), intersection.normal)), scene.materials[intersection.mat_id - 1].phong_exponent);
+    float dist_squared = dot(L, L);
+
+    Vec3f colorForPl = multiplyVector(scene.materials[intersection.mat_id - 1].specular, multiplyScalar(pl.intensity, cos_alpha_with_phong / dist_squared));
+
+    return colorForPl;
 }
