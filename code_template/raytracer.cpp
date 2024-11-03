@@ -18,7 +18,11 @@ int main(int argc, char* argv[])
         for (int i = 0; i < height; i++) {
             for (int j = 0; j < width; j++) {
                 Ray r = calculateRay(cam, i, j);
-                Vec3f color = computeColor(r, scene);
+                Vec3f color = color = computeColor(r, scene);
+                if((i %100 == 0)  && j == 0){
+                    cout << color.x << " " << color.y << " " << color.z << "at line: " << i << endl;
+                    color = computeColor(r, scene);
+                }
                 int pixelPosition = index * 3;
                 colorPixel(image, pixelPosition, color);
                 index++;
@@ -46,9 +50,10 @@ Ray calculateRay(Camera cam, int i, int j) {
 
 Vec3f computeColor(Ray ray, Scene scene) {
     float min_t = __FLT_MAX__;
-    Intersection intersection = findClosestIntersection(min_t, ray, scene);
+    bool is_shadow = false;
+    Intersection intersection = findClosestIntersection( ray, scene, is_shadow);
 
-    if (min_t == __FLT_MAX__)
+    if (intersection.t == -1)
         return { (float) scene.background_color.x, (float) scene.background_color.y, (float) scene.background_color.z }; //no intersection, returning background color
 
     Vec3f color = { 0.0, 0.0, 0.0 };;
@@ -60,9 +65,10 @@ Vec3f computeColor(Ray ray, Scene scene) {
         Vec3f normalizedLightDirection = normalize(lightDirection);
         Ray shadowRay = { pointPlusEpsilon, normalizedLightDirection };
         float temp = __FLT_MAX__;
-        Intersection shadowIntersection = findClosestIntersection(temp, shadowRay, scene);
+        is_shadow = true;
+        Intersection shadowIntersection = findClosestIntersection(shadowRay, scene, is_shadow);
 
-        if (shadowIntersection.t >= norm(lightDirection) || shadowIntersection.t == -1) {
+        if (shadowIntersection.t >= (norm(lightDirection)-scene.shadow_ray_epsilon) || shadowIntersection.t == -1) {
             color = add(color, diffuseShading(scene, intersection, pl));
             color = add(color, specularShading(scene, intersection, ray, pl));
         }
@@ -71,32 +77,59 @@ Vec3f computeColor(Ray ray, Scene scene) {
     return color;
 }
 
-Intersection findClosestIntersection(float &min_t, Ray ray, Scene scene) {
+
+Intersection findClosestIntersection(Ray ray, Scene scene, bool is_shadow) {
+    float min_t = __FLT_MAX__; //initially infinite
     Intersection temp_intersection;
     Intersection intersection;
     intersection.t = -1;
 
     for(int i = 0; i < scene.spheres.size(); i++) {
-        temp_intersection = intersectSphere(ray, scene.spheres[i], scene.vertex_data); //get intersection point with that spesific sphere
-        if (temp_intersection.t < min_t && temp_intersection.t >= 1) { //closer and in front of the image window
-            min_t = temp_intersection.t;
-            intersection = temp_intersection;
+        temp_intersection = intersectSphere(ray, scene.spheres[i], scene.vertex_data, scene); //get intersection point with that spesific sphere
+        if(is_shadow){
+            if (temp_intersection.t < min_t && temp_intersection.t >= -scene.shadow_ray_epsilon){
+                min_t = temp_intersection.t;
+                intersection = temp_intersection;
+            } 
         }
+        else{
+            if (temp_intersection.t < min_t && temp_intersection.t >= 1-scene.shadow_ray_epsilon) { //closer and in front of the image window
+                min_t = temp_intersection.t;
+                intersection = temp_intersection;
+            }
+        }
+
     }
     for (int i = 0; i < scene.triangles.size(); i++) {
-        temp_intersection = intersectTriangle(ray, scene.triangles[i], scene.vertex_data);
-        if (temp_intersection.t < min_t && temp_intersection.t >= 1) {
-            min_t = temp_intersection.t;
-            intersection = temp_intersection;
+        temp_intersection = intersectTriangle(ray, scene.triangles[i], scene.vertex_data, scene);
+        if(is_shadow){
+            if (temp_intersection.t < min_t && temp_intersection.t >= -scene.shadow_ray_epsilon){
+                min_t = temp_intersection.t;
+                intersection = temp_intersection;
+            } 
+        }
+        else{
+            if (temp_intersection.t < min_t && temp_intersection.t >= 1-scene.shadow_ray_epsilon) { //closer and in front of the image window
+                min_t = temp_intersection.t;
+                intersection = temp_intersection;
+            }
         }
     }
     for (int i = 0; i < scene.meshes.size(); i++) {
         for (int j = 0; j < scene.meshes[i].faces.size(); j++) {
             Triangle triangle = { scene.meshes[i].material_id, scene.meshes[i].faces[j] };
-            temp_intersection = intersectTriangle(ray, triangle, scene.vertex_data);
-            if (temp_intersection.t < min_t && temp_intersection.t >= 1) {
-                min_t = temp_intersection.t;
-                intersection = temp_intersection;
+            temp_intersection = intersectTriangle(ray, triangle, scene.vertex_data, scene);
+            if(is_shadow){
+                if (temp_intersection.t < min_t && temp_intersection.t >= -scene.shadow_ray_epsilon){
+                    min_t = temp_intersection.t;
+                    intersection = temp_intersection;
+                } 
+            }
+            else{
+                if (temp_intersection.t < min_t && temp_intersection.t >= 1-scene.shadow_ray_epsilon) { //closer and in front of the image window
+                    min_t = temp_intersection.t;
+                    intersection = temp_intersection;
+                }
             }
         }
     }
@@ -104,7 +137,8 @@ Intersection findClosestIntersection(float &min_t, Ray ray, Scene scene) {
     return intersection;
 }
 
-Intersection intersectSphere(Ray r, Sphere s, vector<Vec3f> vertex_data){
+Intersection intersectSphere(Ray r, Sphere s, vector<Vec3f> vertex_data, Scene scene) { 
+    //if t becomes negative, even though delta is positive, it is handled at caller function as expected
     Intersection intersection;
     float A,B,C; //coefficients of the quadratic equation
     float delta;
@@ -120,17 +154,21 @@ Intersection intersectSphere(Ray r, Sphere s, vector<Vec3f> vertex_data){
     A = r.d.x * r.d.x + r.d.y * r.d.y + r.d.z * r.d.z;
 
     delta = B*B - 4*A*C;
-    if (delta < 0)
+    if (delta < scene.shadow_ray_epsilon)
         intersection.t = -1; //no intersection
-    else if (delta == 0)
-        intersection.t = -B / (2*A); //one intersection point (tangent)
-    else {
-        delta = sqrt(delta);
-        A = 2*A;
-        float t1 = (-B - delta) / (A);
-        float t2 = (-B + delta) / (A);
-        intersection.t = (t1 < t2) ? t1 : t2; //return the closest intersection point
+
+    else{
+        float t1 = (-B - sqrt(delta)) / (2*A);
+        float t2 = (-B + sqrt(delta)) / (2*A);
+        intersection.t = (t1 < t2) ? t1 : t2; //finding closes point
+        if(intersection.t < scene.shadow_ray_epsilon) {
+            intersection.t = (t1 > t2) ? t1 : t2; //if the closest is negative, checking the other
+            if(intersection.t < scene.shadow_ray_epsilon)
+                intersection.t = -1; //if both are negative, no desired intersection
+        }
     }
+
+
 
     intersection.point = add(r.e, multiplyScalar(r.d, intersection.t));
     intersection.normal = normalize(subtract(intersection.point, center));
@@ -139,7 +177,9 @@ Intersection intersectSphere(Ray r, Sphere s, vector<Vec3f> vertex_data){
     return intersection;
 }
 
-Intersection intersectTriangle(Ray ray, Triangle triangle, vector<Vec3f> vertex_data) {
+
+
+Intersection intersectTriangle(Ray ray, Triangle triangle, vector<Vec3f> vertex_data, Scene scene) {
     Intersection intersection;
     float t, alpha, beta, gama, detA;
     Vec3f v1 = vertex_data[triangle.indices.v0_id - 1];
@@ -149,6 +189,7 @@ Intersection intersectTriangle(Ray ray, Triangle triangle, vector<Vec3f> vertex_
     detA = determinant( v1.x-v2.x, v1.x-v3.x, ray.d.x,
                         v1.y-v2.y, v1.y-v3.y, ray.d.y,
                         v1.z-v2.z, v1.z-v3.z, ray.d.z );
+    
     beta = determinant( v1.x-ray.e.x, v1.x-v3.x, ray.d.x,
                         v1.y-ray.e.y, v1.y-v3.y, ray.d.y,
                         v1.z-ray.e.z, v1.z-v3.z, ray.d.z ) / detA;
@@ -159,7 +200,7 @@ Intersection intersectTriangle(Ray ray, Triangle triangle, vector<Vec3f> vertex_
                     v1.y-v2.y, v1.y-v3.y, v1.y-ray.e.y,
                     v1.z-v2.z, v1.z-v3.z, v1.z-ray.e.z ) / detA;
 
-    if (beta + gama <= 1 && beta >= 0 && gama >= 0 && t > 0) {
+    if (beta + gama <= (1+scene.shadow_ray_epsilon) && beta >= -scene.shadow_ray_epsilon && gama >= -scene.shadow_ray_epsilon && t > 0) {
         intersection.t = t;
         intersection.point = add(ray.e, multiplyScalar(ray.d, t));
         intersection.normal = normalize(cross(subtract(v3, v2), subtract(v1, v2)));
