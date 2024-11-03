@@ -3,11 +3,12 @@ using namespace parser;
 
 typedef struct {
     Vec3f e, d; //eye and direction (ray = e + dt)
+		int depth;
 } Ray;
 
 typedef struct
 {
-    float t; // intersection time
+  float t; // intersection time
 	Vec3f point;
 	Vec3f normal;
 	int mat_id;

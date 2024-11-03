@@ -12,20 +12,13 @@ int main(int argc, char* argv[])
         unsigned char* image = new unsigned char [width * height * 3];
 
         cam.gaze = normalize(cam.gaze);
-        calculateCameraUVector(cam);
 
         int index = 0;
         for (int i = 0; i < height; i++) {
-            for (int j = 0; j < width; j++) {
-                Ray r = calculateRay(cam, i, j);
-                Vec3f color = color = computeColor(r, scene);
-                if((i %100 == 0)  && j == 0){
-                    cout << color.x << " " << color.y << " " << color.z << "at line: " << i << endl;
-                    color = computeColor(r, scene);
-                }
-                int pixelPosition = index * 3;
-                colorPixel(image, pixelPosition, color);
-                index++;
+            for (int j = 0; j < width; j++, index++) {
+                Ray ray = calculateRay(cam, i, j);
+                Vec3f color = computeColor(ray, scene);
+                colorPixel(image, index * 3, color);
             }
         }
 
@@ -36,47 +29,19 @@ int main(int argc, char* argv[])
 
 Ray calculateRay(Camera cam, int i, int j) {
     Ray r;
-    Vec3f s; //pixel position at (i-th row, j-th column)
+    Vec3f cameraUVector = cross(cam.up, negateVector(cam.gaze));
     float su = (j+0.5) * (cam.near_plane.y - cam.near_plane.x) / cam.image_width; //su is horizontal distance
     float sv = (i+0.5) * (cam.near_plane.w - cam.near_plane.z) / cam.image_height; //sv is vertical distance
-
     Vec3f m = add(cam.position, multiplyScalar(cam.gaze, cam.near_distance));
-    Vec3f q = add(m, add(multiplyScalar(cam.u, cam.near_plane.x), multiplyScalar(cam.up, cam.near_plane.w)));
-    s = add(q, add(multiplyScalar(cam.u, su), multiplyScalar(cam.up, -sv)));
+    Vec3f q = add(m, add(multiplyScalar(cameraUVector, cam.near_plane.x), multiplyScalar(cam.up, cam.near_plane.w)));
+    Vec3f s = add(q, add(multiplyScalar(cameraUVector, su), multiplyScalar(cam.up, -sv))); //pixel position at (i-th row, j-th column)
+
     r.e = cam.position;
     r.d = add(s, multiplyScalar(cam.position, -1)); //direction vector */
+    r.depth = 0;
+
     return r;
 }
-
-Vec3f computeColor(Ray ray, Scene scene) {
-    float min_t = __FLT_MAX__;
-    bool is_shadow = false;
-    Intersection intersection = findClosestIntersection( ray, scene, is_shadow);
-
-    if (intersection.t == -1)
-        return { (float) scene.background_color.x, (float) scene.background_color.y, (float) scene.background_color.z }; //no intersection, returning background color
-
-    Vec3f color = { 0.0, 0.0, 0.0 };;
-    color = add(color, ambientShading(scene, intersection));
-
-    Vec3f pointPlusEpsilon = add(intersection.point, multiplyScalar(intersection.normal, scene.shadow_ray_epsilon));
-    for (PointLight pl : scene.point_lights) {
-        Vec3f lightDirection = subtract(pl.position, intersection.point);
-        Vec3f normalizedLightDirection = normalize(lightDirection);
-        Ray shadowRay = { pointPlusEpsilon, normalizedLightDirection };
-        float temp = __FLT_MAX__;
-        is_shadow = true;
-        Intersection shadowIntersection = findClosestIntersection(shadowRay, scene, is_shadow);
-
-        if (shadowIntersection.t >= (norm(lightDirection)-scene.shadow_ray_epsilon) || shadowIntersection.t == -1) {
-            color = add(color, diffuseShading(scene, intersection, pl));
-            color = add(color, specularShading(scene, intersection, ray, pl));
-        }
-    }
-
-    return color;
-}
-
 
 Intersection findClosestIntersection(Ray ray, Scene scene, bool is_shadow) {
     float min_t = __FLT_MAX__; //initially infinite
@@ -154,21 +119,17 @@ Intersection intersectSphere(Ray r, Sphere s, vector<Vec3f> vertex_data, Scene s
     A = r.d.x * r.d.x + r.d.y * r.d.y + r.d.z * r.d.z;
 
     delta = B*B - 4*A*C;
-    if (delta < scene.shadow_ray_epsilon)
+    if (delta < -scene.shadow_ray_epsilon)
         intersection.t = -1; //no intersection
-
-    else{
-        float t1 = (-B - sqrt(delta)) / (2*A);
-        float t2 = (-B + sqrt(delta)) / (2*A);
-        intersection.t = (t1 < t2) ? t1 : t2; //finding closes point
-        if(intersection.t < scene.shadow_ray_epsilon) {
-            intersection.t = (t1 > t2) ? t1 : t2; //if the closest is negative, checking the other
-            if(intersection.t < scene.shadow_ray_epsilon)
-                intersection.t = -1; //if both are negative, no desired intersection
-        }
+    else if (delta > -scene.shadow_ray_epsilon && delta < scene.shadow_ray_epsilon)
+        intersection.t = -B / (2*A);
+    else {
+        delta = sqrt(delta);
+        A = 2*A;
+        float t1 = (-B - delta) / (A);
+        float t2 = (-B + delta) / (A);
+        intersection.t = (t1 < t2) ? t1 : t2; //return the closest intersection point
     }
-
-
 
     intersection.point = add(r.e, multiplyScalar(r.d, intersection.t));
     intersection.normal = normalize(subtract(intersection.point, center));
@@ -176,8 +137,6 @@ Intersection intersectSphere(Ray r, Sphere s, vector<Vec3f> vertex_data, Scene s
 
     return intersection;
 }
-
-
 
 Intersection intersectTriangle(Ray ray, Triangle triangle, vector<Vec3f> vertex_data, Scene scene) {
     Intersection intersection;
@@ -213,14 +172,47 @@ Intersection intersectTriangle(Ray ray, Triangle triangle, vector<Vec3f> vertex_
     return intersection;
 }
 
-void colorPixel(unsigned char* &image, int pixelPosition, Vec3f color) {
-    image[pixelPosition] = (int) round(min(max(0.f, color.x), 255.f));
-    image[pixelPosition + 1] = (int) round(min(max(0.f, color.y), 255.f));
-    image[pixelPosition + 2] =  (int) round(min(max(0.f, color.z), 255.f));
+Vec3f computeColor(Ray ray, Scene scene) {
+    if (ray.depth > scene.max_recursion_depth)
+        return { 0.f, 0.f, 0.f };
+
+    Intersection intersection = findClosestIntersection(ray, scene, false);
+
+    if (intersection.t != -1) {
+        return applyShading(ray, scene, intersection);
+    }
+    else if (ray.depth == 0) {
+        return { (float) scene.background_color.x, (float) scene.background_color.y, (float) scene.background_color.z };
+    }
+    else {
+        return { 0.f, 0.f, 0.f };
+    }
 }
 
-void calculateCameraUVector (Camera &cam) {
-    cam.u = cross(cam.up, negateVector(cam.gaze));
+Vec3f applyShading(Ray ray, Scene scene, Intersection intersection) {
+    Vec3f color = ambientShading(scene, intersection);
+    Vec3f pointPlusEpsilon = add(intersection.point, multiplyScalar(intersection.normal, scene.shadow_ray_epsilon));
+    Material material = scene.materials[intersection.mat_id - 1];
+
+    if (material.is_mirror) {
+        Ray reflectionRay = {pointPlusEpsilon, negateVector(ray.d), ray.depth + 1};
+        color = add(color, multiplyVector(computeColor(reflectionRay, scene), material.mirror));
+    }
+
+    for (PointLight pl : scene.point_lights) {
+        Vec3f lightDirection = subtract(pl.position, intersection.point);
+        Vec3f normalizedLightDirection = normalize(lightDirection);
+        Ray shadowRay = { pointPlusEpsilon, normalizedLightDirection, 0 };
+        Intersection shadowIntersection = findClosestIntersection(shadowRay, scene, true);
+        bool notInShadow = shadowIntersection.t >= (norm(lightDirection)-scene.shadow_ray_epsilon) || shadowIntersection.t == -1;
+
+        if (notInShadow) {
+            color = add(color, diffuseShading(scene, intersection, pl));
+            color = add(color, specularShading(scene, intersection, ray, pl));
+        }
+    }
+
+    return color;
 }
 
 Vec3f ambientShading(Scene scene, Intersection intersection) {
@@ -251,4 +243,10 @@ Vec3f specularShading(Scene scene, Intersection intersection, Ray ray, PointLigh
     Vec3f colorForPl = multiplyVector(scene.materials[intersection.mat_id - 1].specular, multiplyScalar(pl.intensity, cos_alpha_with_phong / dist_squared));
 
     return colorForPl;
+}
+
+void colorPixel(unsigned char* &image, int pixelPosition, Vec3f color) {
+    image[pixelPosition] = (int) round(min(max(0.f, color.x), 255.f));
+    image[pixelPosition + 1] = (int) round(min(max(0.f, color.y), 255.f));
+    image[pixelPosition + 2] =  (int) round(min(max(0.f, color.z), 255.f));
 }
