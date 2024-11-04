@@ -12,22 +12,34 @@ int main(int argc, char* argv[])
         unsigned char* image = new unsigned char [width * height * 3];
 
         cam.gaze = normalize(cam.gaze);
-
-        int index = 0;
-        for (int i = 0; i < height; i++) {
-            for (int j = 0; j < width; j++, index++) {
-                Ray ray = calculateRay(cam, i, j);
-                Vec3f color = computeColor(ray, scene);
-                colorPixel(image, index * 3, color);
-            }
-        }
+        
+        thread t1(rayTracing, ref(scene), ref(cam), ref(image), 0, height/2, 0, width/2);
+        thread t2(rayTracing, ref(scene), ref(cam), ref(image), 0, height/2, width/2, width);
+        thread t3(rayTracing, ref(scene), ref(cam), ref(image), height/2, height, 0, width/2);
+        thread t4(rayTracing, ref(scene), ref(cam), ref(image), height/2, height, width/2, width);
+        t1.join();
+        t2.join();
+        t3.join();
+        t4.join();
 
         std::string output_path = "../outputs_dev/" + cam.image_name;
         write_ppm(output_path.c_str(), image, cam.image_width, cam.image_height);
+        delete[] image;
     }
 }
 
-Ray calculateRay(Camera cam, int i, int j) {
+void rayTracing(Scene &scene, Camera &cam, unsigned char* &image, int heightStart, int heightEnd, int widthStart, int widthEnd) {
+    for (int i = heightStart; i < heightEnd; i++) {
+        for (int j = widthStart; j < widthEnd; j++) {
+            int index = (i * cam.image_width + j) * 3;
+            Ray ray = calculateRay(cam, i, j);
+            Vec3f color = computeColor(ray, scene);
+            colorPixel(image, index, color);
+        }
+    }
+}
+
+Ray calculateRay(Camera &cam, int i, int j) {
     Ray r;
     Vec3f cameraUVector = cross(cam.up, negateVector(cam.gaze));
     float su = (j+0.5) * (cam.near_plane.y - cam.near_plane.x) / cam.image_width; //su is horizontal distance
@@ -43,7 +55,7 @@ Ray calculateRay(Camera cam, int i, int j) {
     return r;
 }
 
-Intersection findClosestIntersection(Ray ray, Scene scene, bool is_shadow) {
+Intersection findClosestIntersection(Ray ray, Scene &scene, bool is_shadow) {
     float min_t = __FLT_MAX__; //initially infinite
     Intersection temp_intersection;
     Intersection intersection;
@@ -102,7 +114,7 @@ Intersection findClosestIntersection(Ray ray, Scene scene, bool is_shadow) {
     return intersection;
 }
 
-Intersection intersectSphere(Ray r, Sphere s, vector<Vec3f> vertex_data, Scene scene) { 
+Intersection intersectSphere(Ray r, Sphere s, vector<Vec3f> &vertex_data, Scene &scene) { 
     //if t becomes negative, even though delta is positive, it is handled at caller function as expected
     Intersection intersection;
     float A,B,C; //coefficients of the quadratic equation
@@ -138,7 +150,7 @@ Intersection intersectSphere(Ray r, Sphere s, vector<Vec3f> vertex_data, Scene s
     return intersection;
 }
 
-Intersection intersectTriangle(Ray ray, Triangle triangle, vector<Vec3f> vertex_data, Scene scene) {
+Intersection intersectTriangle(Ray ray, Triangle triangle, vector<Vec3f> &vertex_data, Scene &scene) {
     Intersection intersection;
     float t, alpha, beta, gama, detA;
     Vec3f v1 = vertex_data[triangle.indices.v0_id - 1];
@@ -172,7 +184,7 @@ Intersection intersectTriangle(Ray ray, Triangle triangle, vector<Vec3f> vertex_
     return intersection;
 }
 
-Vec3f computeColor(Ray ray, Scene scene) {
+Vec3f computeColor(Ray ray, Scene &scene) {
     if (ray.depth > scene.max_recursion_depth)
         return { 0.f, 0.f, 0.f };
 
@@ -189,15 +201,12 @@ Vec3f computeColor(Ray ray, Scene scene) {
     }
 }
 
-Vec3f applyShading(Ray ray, Scene scene, Intersection intersection) {
+Vec3f applyShading(Ray ray, Scene &scene, Intersection intersection) {
     Vec3f color = ambientShading(scene, intersection);
     Vec3f pointPlusEpsilon = add(intersection.point, multiplyScalar(intersection.normal, scene.shadow_ray_epsilon));
     Material material = scene.materials[intersection.mat_id - 1];
 
-    if (material.is_mirror) {
-        Ray reflectionRay = {pointPlusEpsilon, negateVector(ray.d), ray.depth + 1};
-        color = add(color, multiplyVector(computeColor(reflectionRay, scene), material.mirror));
-    }
+    
 
     for (PointLight pl : scene.point_lights) {
         Vec3f lightDirection = subtract(pl.position, intersection.point);
@@ -211,15 +220,23 @@ Vec3f applyShading(Ray ray, Scene scene, Intersection intersection) {
             color = add(color, specularShading(scene, intersection, ray, pl));
         }
     }
+    if (material.is_mirror) {
+        //normalize(subtract(ray.e, intersection.point))
+        //float cosTheta = dotProduct(intersection.normal, normalizedEyeVector); // w_0.n
+        //reflectedRay.direction = (normalizedEyeVector * -1) + (intersection.normal * (2 * cosTheta));
+        Vec3f reflectionDirection = subtract(multiplyScalar(intersection.normal, 2 * dot(normalize(subtract(ray.e, intersection.point)), intersection.normal)), normalize(subtract(ray.e, intersection.point)));
+        Ray reflectionRay = {pointPlusEpsilon, reflectionDirection, ray.depth + 1};
+        color = add(color, multiplyVector(computeColor(reflectionRay, scene), material.mirror));
+    }
 
     return color;
 }
 
-Vec3f ambientShading(Scene scene, Intersection intersection) {
+Vec3f ambientShading(Scene &scene, Intersection intersection) {
     return multiplyVector(scene.ambient_light, scene.materials[intersection.mat_id - 1].ambient);
 }
 
-Vec3f diffuseShading(Scene scene, Intersection intersection, PointLight pl) {
+Vec3f diffuseShading(Scene &scene, Intersection intersection, PointLight pl) {
     Vec3f L = subtract(pl.position, intersection.point); // light vector
     float cos_theta = max(0.f, dot(normalize(L), intersection.normal));
     float dist_squared = dot(L, L);
@@ -228,7 +245,7 @@ Vec3f diffuseShading(Scene scene, Intersection intersection, PointLight pl) {
     return colorForPl;
 }
 
-Vec3f specularShading(Scene scene, Intersection intersection, Ray ray, PointLight pl) {
+Vec3f specularShading(Scene &scene, Intersection intersection, Ray ray, PointLight pl) {
     Vec3f L = subtract(pl.position, intersection.point); // light vector
 
     float cos_theta = max(0.f, dot(normalize(L), intersection.normal));
