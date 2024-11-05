@@ -14,6 +14,19 @@ typedef struct
 	int mat_id;
 } Intersection;
 
+typedef struct{
+	int material_id;
+    Face indices;
+	Vec3f normal;
+}ExtendedTriangle;
+
+typedef struct{
+	int material_id;
+    std::vector<Face> faces;
+	std::vector<Vec3f> normals;	
+}ExtendedMesh;
+
+
 Vec3f multiplyScalar(Vec3f v, float s);
 Vec3f normalize(Vec3f v);
 Vec3f add(Vec3f a, Vec3f b);

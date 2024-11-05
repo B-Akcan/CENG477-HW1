@@ -1,10 +1,34 @@
 #include "raytracer.h"
 
+
+vector<ExtendedTriangle> extendedTriangleVector; //triangle with normal
+vector<ExtendedMesh> extendedMeshVector; //mesh with normal
 int main(int argc, char* argv[])
 {
     parser::Scene scene;
 
     scene.loadFromXml(argv[1]);
+    for(Triangle &t: scene.triangles){
+        Vec3f v1 = scene.vertex_data[t.indices.v0_id - 1];
+        Vec3f v2 = scene.vertex_data[t.indices.v1_id - 1];
+        Vec3f v3 = scene.vertex_data[t.indices.v2_id - 1];
+        Vec3f normal = normalize(cross(subtract(v3, v2), subtract(v1, v2)));
+        extendedTriangleVector.push_back({t.material_id, t.indices, normal});
+    }
+
+    for(Mesh &m: scene.meshes){
+        ExtendedMesh em;
+        em.material_id = m.material_id;
+        em.faces = m.faces;
+        for(Face &f: m.faces){
+            Vec3f v1 = scene.vertex_data[f.v0_id - 1];
+            Vec3f v2 = scene.vertex_data[f.v1_id - 1];
+            Vec3f v3 = scene.vertex_data[f.v2_id - 1];
+            Vec3f normal = normalize(cross(subtract(v3, v2), subtract(v1, v2)));
+            em.normals.push_back(normal); 
+        }
+        extendedMeshVector.push_back(em);
+    }
 
     for (Camera cam : scene.cameras) {
         int width = cam.image_width;
@@ -33,7 +57,7 @@ void rayTracing(Scene &scene, Camera &cam, unsigned char* &image, int heightStar
         for (int j = widthStart; j < widthEnd; j++) {
             int index = (i * cam.image_width + j) * 3;
             Ray ray = calculateRay(cam, i, j);
-            Vec3f color = computeColor(ray, scene);
+            Vec3f color = computeColor(ray, scene, false);
             colorPixel(image, index, color);
         }
     }
@@ -77,8 +101,8 @@ Intersection findClosestIntersection(Ray ray, Scene &scene, bool is_shadow) {
         }
 
     }
-    for (int i = 0; i < scene.triangles.size(); i++) {
-        temp_intersection = intersectTriangle(ray, scene.triangles[i], scene.vertex_data, scene);
+    for (int i = 0; i < extendedTriangleVector.size(); i++) {
+        temp_intersection = intersectTriangle(ray, extendedTriangleVector[i], scene.vertex_data, scene);
         if(is_shadow){
             if (temp_intersection.t < min_t && temp_intersection.t >= -scene.shadow_ray_epsilon){
                 min_t = temp_intersection.t;
@@ -92,10 +116,10 @@ Intersection findClosestIntersection(Ray ray, Scene &scene, bool is_shadow) {
             }
         }
     }
-    for (int i = 0; i < scene.meshes.size(); i++) {
-        for (int j = 0; j < scene.meshes[i].faces.size(); j++) {
-            Triangle triangle = { scene.meshes[i].material_id, scene.meshes[i].faces[j] };
-            temp_intersection = intersectTriangle(ray, triangle, scene.vertex_data, scene);
+    for (int i = 0; i < extendedMeshVector.size(); i++) {
+        for (int j = 0; j < extendedMeshVector[i].faces.size(); j++) {
+            ExtendedTriangle et = { extendedMeshVector[i].material_id, extendedMeshVector[i].faces[j], extendedMeshVector[i].normals[j] };
+            temp_intersection = intersectTriangle(ray, et, scene.vertex_data, scene);
             if(is_shadow){
                 if (temp_intersection.t < min_t && temp_intersection.t >= -scene.shadow_ray_epsilon){
                     min_t = temp_intersection.t;
@@ -150,7 +174,7 @@ Intersection intersectSphere(Ray r, Sphere s, vector<Vec3f> &vertex_data, Scene 
     return intersection;
 }
 
-Intersection intersectTriangle(Ray ray, Triangle triangle, vector<Vec3f> &vertex_data, Scene &scene) {
+Intersection intersectTriangle(Ray ray, ExtendedTriangle triangle, vector<Vec3f> &vertex_data, Scene &scene) {
     Intersection intersection;
     float t, alpha, beta, gama, detA;
     Vec3f v1 = vertex_data[triangle.indices.v0_id - 1];
@@ -174,7 +198,7 @@ Intersection intersectTriangle(Ray ray, Triangle triangle, vector<Vec3f> &vertex
     if (beta + gama <= (1+scene.shadow_ray_epsilon) && beta >= -scene.shadow_ray_epsilon && gama >= -scene.shadow_ray_epsilon && t > 0) {
         intersection.t = t;
         intersection.point = add(ray.e, multiplyScalar(ray.d, t));
-        intersection.normal = normalize(cross(subtract(v3, v2), subtract(v1, v2)));
+        intersection.normal = triangle.normal; //NORMAL
         intersection.mat_id = triangle.material_id;
     }
     else {
@@ -184,11 +208,11 @@ Intersection intersectTriangle(Ray ray, Triangle triangle, vector<Vec3f> &vertex
     return intersection;
 }
 
-Vec3f computeColor(Ray ray, Scene &scene) {
-    if (ray.depth > scene.max_recursion_depth)
+Vec3f computeColor(Ray ray, Scene &scene, bool is_shadow_or_reflection) {
+    if (ray.depth >= scene.max_recursion_depth)
         return { 0.f, 0.f, 0.f };
 
-    Intersection intersection = findClosestIntersection(ray, scene, false);
+    Intersection intersection = findClosestIntersection(ray, scene, is_shadow_or_reflection);
 
     if (intersection.t != -1) {
         return applyShading(ray, scene, intersection);
@@ -202,7 +226,9 @@ Vec3f computeColor(Ray ray, Scene &scene) {
 }
 
 Vec3f applyShading(Ray ray, Scene &scene, Intersection intersection) {
+    //if (ray.depth == 0)
     Vec3f color = ambientShading(scene, intersection);
+    //TODO: check whether ambient should be added once or not depending 
     Vec3f pointPlusEpsilon = add(intersection.point, multiplyScalar(intersection.normal, scene.shadow_ray_epsilon));
     Material material = scene.materials[intersection.mat_id - 1];
 
@@ -226,7 +252,7 @@ Vec3f applyShading(Ray ray, Scene &scene, Intersection intersection) {
         //reflectedRay.direction = (normalizedEyeVector * -1) + (intersection.normal * (2 * cosTheta));
         Vec3f reflectionDirection = subtract(multiplyScalar(intersection.normal, 2 * dot(normalize(subtract(ray.e, intersection.point)), intersection.normal)), normalize(subtract(ray.e, intersection.point)));
         Ray reflectionRay = {pointPlusEpsilon, reflectionDirection, ray.depth + 1};
-        color = add(color, multiplyVector(computeColor(reflectionRay, scene), material.mirror));
+        color = add(color, multiplyVector(computeColor(reflectionRay, scene, true), material.mirror));
     }
 
     return color;
