@@ -1,13 +1,13 @@
 #include "raytracer.h"
 
-
 vector<ExtendedTriangle> extendedTriangleVector; //triangle with normal
 vector<ExtendedMesh> extendedMeshVector; //mesh with normal
+
 int main(int argc, char* argv[])
 {
     parser::Scene scene;
-
     scene.loadFromXml(argv[1]);
+
     for(Triangle &t: scene.triangles){
         Vec3f v1 = scene.vertex_data[t.indices.v0_id - 1];
         Vec3f v2 = scene.vertex_data[t.indices.v1_id - 1];
@@ -209,7 +209,7 @@ Intersection intersectTriangle(Ray ray, ExtendedTriangle triangle, vector<Vec3f>
 }
 
 Vec3f computeColor(Ray ray, Scene &scene, bool is_shadow_or_reflection) {
-    if (ray.depth >= scene.max_recursion_depth)
+    if (ray.depth > scene.max_recursion_depth)
         return { 0.f, 0.f, 0.f };
 
     Intersection intersection = findClosestIntersection(ray, scene, is_shadow_or_reflection);
@@ -226,13 +226,9 @@ Vec3f computeColor(Ray ray, Scene &scene, bool is_shadow_or_reflection) {
 }
 
 Vec3f applyShading(Ray ray, Scene &scene, Intersection intersection) {
-    //if (ray.depth == 0)
     Vec3f color = ambientShading(scene, intersection);
-    //TODO: check whether ambient should be added once or not depending 
     Vec3f pointPlusEpsilon = add(intersection.point, multiplyScalar(intersection.normal, scene.shadow_ray_epsilon));
     Material material = scene.materials[intersection.mat_id - 1];
-
-    
 
     for (PointLight pl : scene.point_lights) {
         Vec3f lightDirection = subtract(pl.position, intersection.point);
@@ -246,10 +242,8 @@ Vec3f applyShading(Ray ray, Scene &scene, Intersection intersection) {
             color = add(color, specularShading(scene, intersection, ray, pl));
         }
     }
+
     if (material.is_mirror) {
-        //normalize(subtract(ray.e, intersection.point))
-        //float cosTheta = dotProduct(intersection.normal, normalizedEyeVector); // w_0.n
-        //reflectedRay.direction = (normalizedEyeVector * -1) + (intersection.normal * (2 * cosTheta));
         Vec3f reflectionDirection = subtract(multiplyScalar(intersection.normal, 2 * dot(normalize(subtract(ray.e, intersection.point)), intersection.normal)), normalize(subtract(ray.e, intersection.point)));
         Ray reflectionRay = {pointPlusEpsilon, reflectionDirection, ray.depth + 1};
         color = add(color, multiplyVector(computeColor(reflectionRay, scene, true), material.mirror));
